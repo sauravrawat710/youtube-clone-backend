@@ -10,7 +10,7 @@ const client = new MongoClient(`${process.env.MONGODB_URL}/${DB_Name}`, {
   },
 });
 
-export async function run() {
+export async function connectDB() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
