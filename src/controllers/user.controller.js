@@ -3,7 +3,7 @@ import { ApiError } from "../utlis/apiError.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utlis/cloudinary.js";
 import { ApiResponse } from "../utlis/apiResponse.js";
-import { json } from "express";
+import jwt from "jsonwebtoken";
 
 const generateAccessTokenAndRefreshToken = async (userId) => {
   try {
@@ -16,11 +16,11 @@ const generateAccessTokenAndRefreshToken = async (userId) => {
     await user.save({ validateBeforeSave: false });
 
     return { accessToken, refreshToken };
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Something went wrong while generating access & refresh tokens",
-    });
+  } catch {
+    throw ApiError(
+      200,
+      "Something went wrong while generating access & refresh tokens"
+    );
   }
 };
 
@@ -108,7 +108,7 @@ const registerUser = asyncHandler(async (req, res) => {
 const loginUser = asyncHandler(async (req, res) => {
   const { username, email, password } = req.body;
 
-  if (!username || !email) {
+  if (!username && !email) {
     return res.status(401).json({
       success: false,
       message: "Email or Username is required",
@@ -181,4 +181,57 @@ const logoutUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "User logged out successfully"));
 });
 
-export { registerUser, loginUser, logoutUser };
+const requestAuthToken = asyncHandler(async (req, res) => {
+  const incommingRefreshToken =
+    req.cookies.refreshToken || req.body.refreshToken;
+
+  if (!incommingRefreshToken) {
+    throw new ApiResponse(401, "unauthorized request");
+  }
+
+  try {
+    const decodedToken = jwt.verify(
+      incommingRefreshToken || undefined,
+      process.env.REFRESH_TOKEN_SECRET
+    );
+
+    const user = await User.findById(decodedToken._id);
+
+    if (!user) {
+      throw new ApiResponse(401, "Invalid refresh token");
+    }
+
+    if (incommingRefreshToken !== user?.refreshToken) {
+      throw new ApiResponse(401, "Refresh token is expired or used");
+    }
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    const { accessToken, refreshToken } =
+      await generateAccessTokenAndRefreshToken(user._id);
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", refreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          {
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+          },
+          "Access Token refreshed"
+        )
+      );
+  } catch (error) {
+    throw new ApiError(200, {
+      message: error?.message || "Invalid Refresh Token",
+    });
+  }
+});
+
+export { registerUser, loginUser, logoutUser, requestAuthToken };
